@@ -64,6 +64,8 @@ image files are git-ignored.
 
 ## Quick start
 
+Make sure to check the container folder to create your .sif file first.
+
 ```bash
 # 1. The env that runs Snakemake (once)
 micromamba create -n snakemake_env -f envs/snakemake_env.yml
