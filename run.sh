@@ -20,37 +20,25 @@
 # set SBATCH_PARTITION / SBATCH_ACCOUNT if your cluster needs them.
 set -euo pipefail
 
-cd "$(dirname "$(readlink -f "$0")")"      # repo root (holds workflow/, config/, profiles/)
-REPO=$PWD
+module load stack/2024-06 gcc/12.2.0 python/3.11.6
+export PATH="$HOME/.local/bin:$PATH"       # where `pip install --user` puts snakemake
+
+cd "$(dirname "$0")"                       # workflow dir (holds Snakefile + config.yaml)
 PROFILE=profiles/slurm
 MODE="${1:-dry}"
-shift || true
 
-# -- how to call Snakemake ----------------------------------------------------
-if [ -n "${SNAKEMAKE:-}" ]; then
-    read -r -a SMK <<< "$SNAKEMAKE"
-elif command -v snakemake > /dev/null; then
-    SMK=(snakemake)
-elif MM="${MAMBA_EXE:-$(command -v micromamba || true)}" && [ -n "$MM" ]; then
-    SMK=("$MM" run -n snakemake_env snakemake)
-else
-    echo "Snakemake not found: activate snakemake_env or set SNAKEMAKE=/path/to/snakemake" >&2
-    exit 1
+# First run on a new account: install snakemake + the SLURM executor plugin into
+# ~/.local. Skipped on every later run.
+if ! command -v snakemake >/dev/null 2>&1 || \
+   ! python3 -c 'import snakemake_executor_plugin_slurm' >/dev/null 2>&1; then
+  echo "[run.sh] installing snakemake into ~/.local (one-time, takes a minute)"
+  module load eth_proxy 2>/dev/null || true   # outbound network for pip
+  python3 -m pip install --user --quiet \
+    snakemake snakemake-executor-plugin-slurm  # pin as 'snakemake>=8,<9' if v9 breaks
+  hash -r
+  command -v snakemake >/dev/null || { echo "ERROR: install failed"; exit 1; }
+  echo "[run.sh] installed snakemake $(snakemake --version)"
 fi
-
-# -- config file in use (for the orchestrator log location) --------------------
-CONFIG=config/config.yaml
-ARGS=("$@")
-for i in "${!ARGS[@]}"; do
-    case "${ARGS[$i]}" in
-        --configfile)   CONFIG="${ARGS[$((i + 1))]:-$CONFIG}" ;;
-        --configfile=*) CONFIG="${ARGS[$i]#*=}" ;;
-    esac
-done
-
-results_dir() {   # paths.results_dir from a config file
-    sed -n -E "s/^[[:space:]]+results_dir:[[:space:]]*[\"']?([^\"'#[:space:]]+).*/\1/p" "$1" | head -1
-}
 
 # -----------------------------------------------------------------------------
 case "$MODE" in
